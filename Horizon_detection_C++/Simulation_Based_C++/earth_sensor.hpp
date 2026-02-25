@@ -26,4 +26,5 @@ void findClosestMatch(const std::vector<RealEntry>& table, float target_vx, floa
 std::pair<float, float> calculate_vector(const float data[24][32], const float X_angles[24][32], const float Y_angles[24][32], float origin_x, float origin_y);
 float integrate_angles(const float data[24][32], const float X_angles[24][32], const float Y_angles[24][32]);
 
+
 #endif
