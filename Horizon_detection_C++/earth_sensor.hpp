@@ -1,29 +1,38 @@
 #ifndef EARTH_SENSOR_HPP
 #define EARTH_SENSOR_HPP
 
-#include <vector>
-#include <string>
-#include <cstdint>
-#include <utility> // for std::pair
+#include <stdint.h>
+#include <stdbool.h>
 
-// Pack for exact binary alignment
-struct __attribute__((packed)) FixedEntry {
-    int32_t pitch, roll, vx, vy, area;
-};
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-struct RealEntry {
-    float pitch, roll, vx, vy, area;
-};
-
+/* Pi Guard: Ensures Pi is defined for our calculations */
 #ifndef M_PI
     #define M_PI 3.14159265358979323846f
 #endif
 
-// Logic Prototypes - Use float for STM32 hardware acceleration
-std::vector<RealEntry> loadFixedTable(std::string filename);
-void findClosestMatch(const std::vector<RealEntry>& table, float target_vx, float target_vy, float target_area);
+/* Struct matches your Python binary output exactly */
+typedef struct __attribute__((packed)) {
+    int32_t pitch;
+    int32_t roll;
+    int32_t vx;
+    int32_t vy;
+    int32_t area;
+} FixedEntry;
 
-std::pair<float, float> calculate_vector(const float data[24][32], const float X_angles[24][32], const float Y_angles[24][32], float origin_x, float origin_y);
-float integrate_angles(const float data[24][32], const float X_angles[24][32], const float Y_angles[24][32]);
+typedef struct {
+    float pitch;
+    float roll;
+    bool valid;
+} AttitudeResult;
+
+/* Function to be called from main.c */
+AttitudeResult calculate_attitude(const float* mlx_data);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
