@@ -36,8 +36,11 @@ from Basilisk.utilities import (
 #import simulation related support
 from Basilisk.simulation import (
     spacecraft,
-    extForceTorque,
+    # extForceTorque,
     simpleNav,
+    magneticFieldWMM,
+    magnetometer,
+    MtbEffector
 )
 
 #import FSW Algo related support, might need to be rewritten
@@ -45,6 +48,10 @@ from Basilisk.fswAlgorithms import(
     mrpFeedback,
     inertial3D,
     attTrackingError,
+    tamComm,
+    torque2Dipole,
+    dipoleMapping,
+    # mtbFeedforward
 )
 
 #import message declarations
@@ -71,8 +78,14 @@ def run():
     """
 
     #create sim variable names
-    simTaskName = "simTask"
-    simProcessName ="simProcess"
+    dynTaskName = "dynTask"
+    dynProcessName = "dynProcess"
+
+    fswTaskName = "fswTask"
+    fswProcessName = "fswProcess"
+
+    # simTaskName = "simTask"
+    # simProcessName ="simProcess"
 
     #sim module as empty container
     scSim = SimulationBaseClass.SimBaseClass()
@@ -81,22 +94,24 @@ def run():
     scSim.SetProgressBar(True)
 
     #sim process
-    dynProcess = scSim.CreateNewProcess(simProcessName)
+    dynProcess = scSim.CreateNewProcess(dynProcessName)
+    fswProcess = scSim.CreateNewProcess(fswProcessName)
 
     #set sim time
     simulationTime = macros.sec2nano(1200.0)
-    simulationTimeStep = macros.sec2nano(0.01)
-    numDataPoints = 400
-    samplingTime = unitTestSupport.samplingTime(simulationTime,simulationTimeStep, numDataPoints)
 
+    simStepTime = macros.sec2nano(0.01)
+    fswStepTime = macros.sec2nano(0.1)
+    
     # dynamics task with specidied integration update time
-    dynProcess.addTask(scSim.CreateNewTask(simTaskName, simulationTimeStep))
+    dynProcess.addTask(scSim.CreateNewTask(dynTaskName, simStepTime))
+    fswProcess.addTask(scSim.CreateNewTask(fswTaskName, fswStepTime))
 
-     #set up sim task/obj, initialize the spacecraft object, dyn sim is setup using spacecraft module
+    #set up sim task/obj, initialize the spacecraft object, dyn sim is setup using spacecraft module
     KEBAB = spacecraft.Spacecraft() # Kinematics and Estimation for Body Attitude Block
     KEBAB.ModelTag ="Kebab"
     #add kebab to sim process
-    scSim.AddModelToTask(simTaskName, KEBAB)
+    scSim.AddModelToTask(dynTaskName, KEBAB)
     
     #define the simulation inertia    
     I= [1.4063E-02, 0., 0.,
@@ -120,11 +135,10 @@ def run():
 
     #setting up gravity body, creating gravity body factor class. creating an empty gravitational body list
     gravFactory=simIncludeGravBody.gravBodyFactory()
+    planet = gravFactory.createEarth()
+    planet.isCentralBody =True  
     #connect grav body to spacecraft
     gravFactory.addBodiesTo(KEBAB)
-
-    planet = gravFactory.createEarth()
-    planet.isCentralBody =True
     
     ggm03s__j2_only_path = get_path(DataFile.LocalGravData.GGM03S_J2_only)
     planet.useSphericalHarmonicsGravityModel(str(ggm03s__j2_only_path),2) #2 indicates only first 2 harmonics. 
@@ -140,45 +154,62 @@ def run():
     #Calc time based parameters
     n = np.sqrt(mu/(oe.a)**3)
     P = 2.0 * np.pi/n
+
+    # create the magnetic field
+    magModule = magneticFieldWMM.MagneticFieldWMM()
+    wmm_path = get_path(DataFile.MagneticFieldData.WMM)
+    magModule.configureWMMFile(str(wmm_path))
+    magModule.ModelTag = "WMM"
+    
+    #set epoch data/time message
+    epochMsg = unitTestSupport.timeStringToGregorianUTCMsg('2019 June 27, 10:23:0.0 (UTC)')
+
+    #add spacecraft to the magnetic field module so it can read the sc pos msg
+    magModule.addSpacecraftToModel(KEBAB.scStateOutMsg)
+
+    #add the mag field module to the dyn task stack
+    scSim.AddModelToTask(dynTaskName, magModule)
+    magModule.epochInMsg.subscribeTo(epochMsg)
+
+    #add mag torquer bar effector
+    mtbEff = MtbEffector.MtbEffector()
+    mtbEff.ModelTag = "MtbEff"
+    KEBAB.addDynamicEffector(mtbEff)
+    scSim.AddModelToTask(dynTaskName, mtbEff)
+    mtbEff.magInMsg.subscribeTo(magModule.envOutMsgs[0])
     
     # #setup the extForceTorque module
     # #the control torque is read in through the messaging system
-    
-    extFTObject = extForceTorque.ExtForceTorque()
-    extFTObject.ModelTag= "externalDisturbance"
-    extFTObject.extTorquePntB_B = [[1e-7], [-1e-7], [5e-8]]
-    KEBAB.addDynamicEffector(extFTObject)
-    scSim.AddModelToTask(simTaskName, extFTObject)
+    # extFTObject = extForceTorque.ExtForceTorque()
+    # extFTObject.ModelTag= "externalDisturbance"
+    # extFTObject.extTorquePntB_B = [[1e-7], [-1e-7], [5e-8]]
+    # KEBAB.addDynamicEffector(extFTObject)
+    #scSim.AddModelToTask(dynTaskName, extFTObject)
 
     # #add the simple Navigation sensor module. This sets SC attitude, rate, position, vel nav message
-    
     KEBAB_NavObj = simpleNav.SimpleNav()
     KEBAB_NavObj.ModelTag ="SimpleNavigation"
-    scSim.AddModelToTask(simTaskName,KEBAB_NavObj)
+    scSim.AddModelToTask(dynTaskName,KEBAB_NavObj)
     KEBAB_NavObj.scStateInMsg.subscribeTo(KEBAB.scStateOutMsg)
 
     # #setup FSW algo tasks
-
-    # #inertial3D guidance module
-    
+    # #inertial3D guidance module    
     KEBAB_inertial3DObj= inertial3D.inertial3D()
     KEBAB_inertial3DObj.ModelTag="inertial3D"
-    scSim.AddModelToTask(simTaskName, KEBAB_inertial3DObj)
+    scSim.AddModelToTask(fswTaskName, KEBAB_inertial3DObj)
     KEBAB_inertial3DObj.sigma_R0N=[0.,0.,0.] #desired inertial orientation
 
-    # #att tracking error eval module
-    
+    # #att tracking error eval module    
     attError=attTrackingError.attTrackingError()
     attError.ModelTag="attErrorInertial3D"
-    scSim.AddModelToTask(simTaskName,attError)
+    scSim.AddModelToTask(fswTaskName,attError)
     attError.attNavInMsg.subscribeTo(KEBAB_NavObj.attOutMsg)
     attError.attRefInMsg.subscribeTo(KEBAB_inertial3DObj.attRefOutMsg)
 
     # #setup MRP Feedback control Module
-    
     mrpControl=mrpFeedback.mrpFeedback()
     mrpControl.ModelTag="mrpFeedback"
-    scSim.AddModelToTask(simTaskName,mrpControl)
+    scSim.AddModelToTask(fswTaskName,mrpControl)
     mrpControl.K=0.01
     mrpControl.Ki = -1
     mrpControl.P = 0.0
@@ -186,26 +217,101 @@ def run():
     mrpControl.guidInMsg.subscribeTo(attError.attGuidOutMsg)
 
     # #mrp feedback algo required the vehicle inertia tensor
-    
     configData=messaging.VehicleConfigMsgPayload(ISCPntB_B=I)
     configDataMsg = messaging.VehicleConfigMsg()
     configDataMsg.write(configData)
     mrpControl.vehConfigInMsg.subscribeTo(configDataMsg)
+
+    #create minimal TAM module
+    TAM = magnetometer.Magnetometer()
+    TAM.ModelTag = "TAM_sensor"
+    #specify the optional TAM variables
+    TAM.scaleFactor = 1.0
+    TAM.senNoiseStd = [0.0, 0.0, 0.0]
+    scSim.AddModelToTask(dynTaskName, TAM)
+    TAM.stateInMsg.subscribeTo(KEBAB.scStateOutMsg)
+    TAM.magInMsg.subscribeTo(magModule.envOutMsgs[0])
+
+    #setup tamComm module
+    tamCommObj = tamComm.tamComm()
+    tamCommObj.dcm_BS = [1., 0., 0., 0., 1., 0., 0., 0., 1.]
+    tamCommObj.ModelTag ="tamComm"
+    scSim.AddModelToTask(fswTaskName, tamCommObj)
+    tamCommObj.tamInMsg.subscribeTo(TAM.tamDataOutMsg)
+
+    #setup torque2Dipole module
+    torque2DipoleObj = torque2Dipole.torque2Dipole()
+    torque2DipoleObj.ModelTag = "torque2Dipole"
+    scSim.AddModelToTask(fswTaskName, torque2DipoleObj)
+    torque2DipoleObj.tauRequestInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
+    torque2DipoleObj.tamSensorBodyInMsg.subscribeTo(tamCommObj.tamOutMsg)
+
+    #mtbconfigdata message
+    mtbConfigParams = messaging.MTBArrayConfigMsgPayload()
+    mtbConfigParams.numMTB = 3
+
+    #row major torque bar alignments
+    mtbConfigParams.GtMatrix_B=[
+        1., 0., 0.,
+        0., 1., 0.,
+        0., 0., 1.]
+    maxDipole = 0.1
+    mtbConfigParams.maxMtbDipoles=[maxDipole]*mtbConfigParams.numMTB
+    mtbParamsInMsg =messaging.MTBArrayConfigMsg().write(mtbConfigParams)
+    mtbEff.mtbParamsInMsg.subscribeTo(mtbParamsInMsg)
+
+    #setup dipolemapping module
+    dipoleMappingObj =dipoleMapping.dipoleMapping()
+
+    #row major torque bar alignment inverse
+    dipoleMappingObj.steeringMatrix = [
+        1., 0., 0.,
+        0., 1., 0.,
+        0., 0., 1.]
+    dipoleMappingObj.ModelTag ="dipoleMapping"
+    scSim.AddModelToTask(fswTaskName,dipoleMappingObj)
+    dipoleMappingObj.dipoleRequestBodyInMsg.subscribeTo(torque2DipoleObj.dipoleRequestOutMsg)
+    dipoleMappingObj.mtbArrayConfigParamsInMsg.subscribeTo(mtbParamsInMsg)
+    mtbEff.mtbCmdInMsg.subscribeTo(dipoleMappingObj.dipoleRequestMtbOutMsg)
+
+    # #setup the mtbfeedforward module
+    # mtbFeedforwardObj = mtbFeedforward.mtbFeedforward()
+    # mtbFeedforwardObj.ModelTag = "mtbFeedforward"
+    # scSim.AddModelToTask(fswTaskName,mtbFeedforwardObj)
+    # mtbFeedforwardObj.vehControlInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
+    # mtbFeedforwardObj.dipoleRequestMtbInMsg.subscribeTo(dipoleMappingObj.dipoleRequestMtbOutMsg)
+    # mtbFeedforwardObj.tamSensorBodyInMsg.subscribeTo(tamCommObj.tamOutMsg)
+    # mtbFeedforwardObj.mtbArrayConfigParamsInMsg.subscribeTo(mtbParamsInMsg)
     
     # #conect the messages to the module
-
-    extFTObject.cmdTorqueInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
+    #extFTObject.cmdTorqueInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
 
     # #setup data logging before sim is initialized
-  
-    dataRec = KEBAB.scStateOutMsg.recorder(samplingTime)
-    scSim.AddModelToTask(simTaskName, dataRec)
+    numDataPoints = 400
     
-    attErrorLog= attError.attGuidOutMsg.recorder(samplingTime)
-    scSim.AddModelToTask(simTaskName,attErrorLog)
+    dynsamplingTime = unitTestSupport.samplingTime(simulationTime,simStepTime, numDataPoints)
+    fswsamplingTime = unitTestSupport.samplingTime(simulationTime,fswStepTime, numDataPoints)
+
+    dataRec = KEBAB.scStateOutMsg.recorder(dynsamplingTime)
+    scSim.AddModelToTask(dynTaskName, dataRec)
     
-    mrpLog = mrpControl.cmdTorqueOutMsg.recorder(samplingTime)
-    scSim.AddModelToTask(simTaskName,mrpLog)
+    attErrorLog= attError.attGuidOutMsg.recorder(fswsamplingTime)
+    scSim.AddModelToTask(fswTaskName,attErrorLog)
+    
+    mrpLog = mrpControl.cmdTorqueOutMsg.recorder(fswsamplingTime)
+    scSim.AddModelToTask(fswTaskName,mrpLog)
+
+    magLog = magModule.envOutMsgs[0].recorder(dynsamplingTime)
+    scSim.AddModelToTask(dynTaskName, magLog)
+
+    tamLog = TAM.tamDataOutMsg.recorder(dynsamplingTime)
+    scSim.AddModelToTask(dynTaskName, tamLog)
+
+    tamCommLog = tamCommObj.tamOutMsg.recorder(fswsamplingTime)
+    scSim.AddModelToTask(fswTaskName, tamCommLog)
+
+    mtbDipoleCmdsLog = dipoleMappingObj.dipoleRequestMtbOutMsg.recorder(fswsamplingTime)
+    scSim.AddModelToTask(fswTaskName,mtbDipoleCmdsLog)
    
     #initialize the sim
     scSim.InitializeSimulation()
@@ -217,14 +323,16 @@ def run():
     #retrive logged data
     posData = dataRec.r_BN_N
     velData = dataRec.v_BN_N
-    timeAxis=dataRec.times()
-    attTime=attErrorLog.times()
+    dynTime=dataRec.times()
+    fswTime=attErrorLog.times()
+    magData = magLog.magField_N
+    
     
     print("NaN in r:", np.isnan(posData).any())
     print("NaN in v:", np.isnan(velData).any())
 
    
-    figureList, finalDiff = plotOrbits(attTime, timeAxis, posData, velData, oe, mu, P, attErrorLog, mrpLog, dataRec )
+    figureList, finalDiff = plotOrbits(fswTime, dynTime, posData, velData, oe, mu, P, attErrorLog, mrpLog, dataRec, magData)
 
     plt.show()
 
@@ -232,9 +340,8 @@ def run():
     return finalDiff, figureList
     
 
-def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLog, dataRec):
+def plotOrbits(fswTime, dynTime, posData, velData, oe, mu, P, attErrorLog, mrpLog, dataRec, magData):
     plt.close("all")
-    # attTime=attErrorLog.times()
     plt.figure(1)
     fig = plt.gcf()
     ax=fig.gca()
@@ -242,7 +349,7 @@ def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLo
     finalDiff= 0.0
         
     for idx in range(3):
-        plt.plot(timeAxis*macros.NANO2SEC/P, posData[:,idx]/1000.0, color=unitTestSupport.getLineColor(idx,3), label= "$r_{BN,"+str(idx) +"}$")
+        plt.plot(dynTime*macros.NANO2SEC/P, posData[:,idx]/1000.0, color=unitTestSupport.getLineColor(idx,3), label= "$r_{BN,"+str(idx) +"}$")
 
     plt.legend(loc="lower right")
     plt.xlabel("Time [orbits]")
@@ -259,10 +366,9 @@ def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLo
     for idx in range(0, len(posData)):
         oeData=orbitalMotion.rv2elem(mu, posData[idx], velData[idx])
         smaData.append(oeData.a /1000.0)
-    plt.plot(timeAxis*macros.NANO2SEC/P, smaData, color ="#aa0000")
+    plt.plot(dynTime*macros.NANO2SEC/P, smaData, color ="#aa0000")
     plt.xlabel("time [orbit]")
     plt.ylabel("SMA [km]")
-
     pltName = fileName + "2"
     figureList[pltName] = plt.figure(2)
     
@@ -270,7 +376,7 @@ def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLo
 
     plt.figure(3)
     for idx in range(3):
-        plt.plot(attTime * macros.NANO2MIN, attErrorLog.sigma_BR[:, idx],
+        plt.plot(fswTime * macros.NANO2MIN, attErrorLog.sigma_BR[:, idx],
                  color=unitTestSupport.getLineColor(idx, 3),
                  label=r'$\sigma_' + str(idx) + '$')
     plt.legend(loc='lower right')
@@ -281,7 +387,7 @@ def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLo
 
     plt.figure(4)
     for idx in range(3):
-        plt.plot(attTime * macros.NANO2MIN, mrpLog.torqueRequestBody[:, idx],
+        plt.plot(fswTime * macros.NANO2MIN, mrpLog.torqueRequestBody[:, idx],
                  color=unitTestSupport.getLineColor(idx, 3),
                  label='$L_{r,' + str(idx) + '}$')
     plt.legend(loc='lower right')
@@ -292,21 +398,40 @@ def plotOrbits(attTime, timeAxis, posData, velData, oe, mu,P, attErrorLog, mrpLo
 
     plt.figure(5)
     for idx in range(3):
-        plt.plot(attTime * macros.NANO2MIN, attErrorLog.omega_BR_B[:, idx],
+        plt.plot(fswTime * macros.NANO2MIN, attErrorLog.omega_BR_B[:, idx],
                  color=unitTestSupport.getLineColor(idx, 3),
                  label=r'$\omega_{BR,' + str(idx) + '}$')
     plt.legend(loc='lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Rate Tracking Error [rad/s] ')
+    pltName = fileName + "5"
+    figureList[pltName] = plt.figure(5)
 
     plt.figure(6)
     for idx in range(3):
-        plt.plot(attTime * macros.NANO2MIN, dataRec.omega_BN_B[:, idx] / 1000.,
+        plt.plot(dynTime * macros.NANO2MIN, dataRec.omega_BN_B[:, idx],
                  color=unitTestSupport.getLineColor(idx, 3),
-                 label='$r_{BN,' + str(idx) + '}$')
+                 label=r'$\omega_{B/N,' + str(idx) + '}$')
     plt.legend(loc='lower right')
     plt.xlabel('Time [min]')
-    plt.ylabel('Inertial Position [km]')
+    plt.ylabel(r'Body Rate $\omega_{B/N}$ [rad/s]')
+    pltName = fileName + "6"
+    figureList[pltName] = plt.figure(6)
+
+    plt.figure(7)
+    fig1 = plt.gcf()
+    ax = fig1.gca()
+    ax.ticklabel_format(useOffset=False, style='sci')
+    ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
+    for idx in range(3):
+        plt.plot(dynTime*macros.NANO2SEC/P, magData[:, idx] *1e9,
+                 color=unitTestSupport.getLineColor(idx, 3),
+                 label=r'$B\_N_{' + str(idx) + '}$')
+    plt.legend(loc='lower right')
+    plt.xlabel('Time [orbits]')
+    plt.ylabel('Magnetic Field [nT]')
+    pltName = fileName + "7" 
+    figureList[pltName] = plt.figure(7)
 
     return figureList, finalDiff
 
