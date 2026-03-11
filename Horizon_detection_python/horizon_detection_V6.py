@@ -85,8 +85,10 @@ def convert_coordinates_canonical(v_x, v_y, area, table, offset_deg):
     if best_idx == -1: return np.nan, np.nan
 
     # --- 3. ROTATE RESULT TO BODY FRAME ---
-    table_p = table[best_idx, 0]
-    table_r = table[best_idx, 1]
+    # Column 0 is the rotation angle (True Roll)
+    # Column 1 is the Y-translation angle (True Pitch)
+    table_r = table[best_idx, 0] 
+    table_p = table[best_idx, 1] 
     
     # The table roll is relative to the sensor. Add the offset to get Body Roll.
     body_roll = (table_r + offset_deg) % 360
