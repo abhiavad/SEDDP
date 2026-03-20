@@ -1,7 +1,7 @@
 
 #pragma once
 #include <math.h>
-
+#include <stdbool.h>
 // include earth horizon sensors system
 #include "CombiningSensor.hpp"
 
@@ -20,6 +20,7 @@ enum ADCSMode {
     MODE_NOMINAL = 2
 };
 
+const uint8_t MAX_ERROR_COUNT = 5; // Threshold for component failing communication with STM32
 
 // Define an index for component health monitoring
 enum ComponentIdx {
@@ -35,12 +36,14 @@ struct SystemData {
     bool componentConnections[NUM_COMPONENTS];
     float updateRate; // in Hz (80MHz is max)
     uint32_t errorCount; // increments on any error, used to check if components fail
-
+    uint32_t watchdogCounter
     uint32_t pitch;
     uint32_t roll;
     uint32_t yaw;
 
     ADCSmode currentMode;
     bool lastResetWatchdog;
+    bool componentActive[NUM_COMPONENTS]; // Tracks if components are currently active (e.g., MTQ firing)
+    uint8_t consecutiveErrorCount[NUM_COMPONENTS]; // Counts consecutive errors for each component to determine if it has failed
     // Add more fields as needed, lot defined in the subsystem files already
 };
