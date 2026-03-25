@@ -264,19 +264,19 @@ def run():
     # SPACECRAFT DYNAMICS
     # =====================================================
 
-    KEBAB = spacecraft.Spacecraft()
-    scSim.AddModelToTask(dynTaskName, KEBAB)
+    delfi = spacecraft.Spacecraft()
+    scSim.AddModelToTask(dynTaskName, delfi)
 
     # =====================================================
     # ENVIRONMENT MODELS
     # =====================================================
 
     atmo = exponentialAtmosphere.ExponentialAtmosphere()
-    atmo.addSpacecraftToModel(KEBAB.scStateOutMsg)
+    atmo.addSpacecraftToModel(delfi.scStateOutMsg)
     scSim.AddModelToTask(dynTaskName, atmo)
 
     magModule = magneticFieldWMM.MagneticFieldWMM()
-    magModule.addSpacecraftToModel(KEBAB.scStateOutMsg)
+    magModule.addSpacecraftToModel(delfi.scStateOutMsg)
     scSim.AddModelToTask(dynTaskName, magModule)
 
     # =====================================================
@@ -407,11 +407,11 @@ def run():
     scSim.AddModelToTask(dynTaskName, aeroTorque)
 
     aeroTorqueEff = extForceTorque.ExtForceTorque()
-    KEBAB.addDynamicEffector(aeroTorqueEff)
+    delfi.addDynamicEffector(aeroTorqueEff)
     scSim.AddModelToTask(dynTaskName, aeroTorqueEff)
 
     mag_Dist = extForceTorque.ExtForceTorque()
-    KEBAB.addDynamicEffector(mag_Dist)
+    delfi.addDynamicEffector(mag_Dist)
     scSim.AddModelToTask(dynTaskName, mag_Dist)
 
     magDist = ResidualMagneticDipoleTorque(m_residual_B)
@@ -422,7 +422,7 @@ def run():
     # =====================================================
 
     mtbEff = MtbEffector.MtbEffector()
-    KEBAB.addDynamicEffector(mtbEff)
+    delfi.addDynamicEffector(mtbEff)
     scSim.AddModelToTask(dynTaskName, mtbEff)
 
     # =====================================================
@@ -435,18 +435,18 @@ def run():
     planet = gravFactory.createEarth()
     planet.isCentralBody = True
 
-    gravFactory.addBodiesTo(KEBAB)
+    gravFactory.addBodiesTo(delfi)
 
     ggEff.addPlanetName(planet.planetName)
-    KEBAB.addDynamicEffector(ggEff)
+    delfi.addDynamicEffector(ggEff)
     scSim.AddModelToTask(dynTaskName, ggEff)
 
     # =====================================================
     # NAVIGATION + SENSORS
     # =====================================================
 
-    KEBAB_NavObj = simpleNav.SimpleNav()
-    scSim.AddModelToTask(dynTaskName, KEBAB_NavObj)
+    delfi_NavObj = simpleNav.SimpleNav()
+    scSim.AddModelToTask(dynTaskName, delfi_NavObj)
 
     TAM = magnetometer.Magnetometer()
     scSim.AddModelToTask(dynTaskName, TAM)
@@ -538,7 +538,7 @@ def run():
     rhoLog = atmo.envOutMsgs[0].recorder(dynsamplingTime)
     scSim.AddModelToTask(dynTaskName, rhoLog)
 
-    dataRec = KEBAB.scStateOutMsg.recorder(dynsamplingTime)
+    dataRec = delfi.scStateOutMsg.recorder(dynsamplingTime)
     scSim.AddModelToTask(dynTaskName, dataRec)
 
     magLog = magModule.envOutMsgs[0].recorder(dynsamplingTime)
@@ -575,7 +575,7 @@ def run():
     rateLog = rateEstimator.rateOutMsg.recorder(fswsamplingTime)
     scSim.AddModelToTask(fswCoreTask, rateLog)
 
-    trueOmegaLog = KEBAB.scStateOutMsg.recorder(dynsamplingTime)
+    trueOmegaLog = delfi.scStateOutMsg.recorder(dynsamplingTime)
     scSim.AddModelToTask(dynTaskName, trueOmegaLog)
 
     bdotLog = bdotPredictor.bdotOutMsg.recorder(fswsamplingTime)
@@ -623,22 +623,22 @@ def run():
     # SPACECRAFT INITIAL CONDITIONS
     # =====================================================
 
-    KEBAB.hub.r_CN_NInit = rN
-    KEBAB.hub.v_CN_NInit = vN
+    delfi.hub.r_CN_NInit = rN
+    delfi.hub.v_CN_NInit = vN
 
-    KEBAB.hub.mHub = m
+    delfi.hub.mHub = m
 
-    KEBAB.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
+    delfi.hub.r_BcB_B = [[0.0], [0.0], [0.0]]
 
-    KEBAB.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d([
+    delfi.hub.IHubPntBc_B = unitTestSupport.np2EigenMatrix3d([
         Ix, 0., 0.,
         0., Iy, 0.,
         0., 0., Iz
     ])
 
-    KEBAB.hub.sigma_BNInit = [[0.1], [0.2], [-0.3]]
+    delfi.hub.sigma_BNInit = [[0.1], [0.2], [-0.3]]
 
-    KEBAB.hub.omega_BN_BInit = [
+    delfi.hub.omega_BN_BInit = [
         omega0,
         -omega0,
         omega0
@@ -676,23 +676,23 @@ def run():
     dragEff.atmoDensInMsg.subscribeTo(atmo.envOutMsgs[0])
 
     aeroTorque.atmoInMsg.subscribeTo(atmo.envOutMsgs[0])
-    aeroTorque.stateInMsg.subscribeTo(KEBAB.scStateOutMsg)
+    aeroTorque.stateInMsg.subscribeTo(delfi.scStateOutMsg)
 
 
     # =====================================================
     # SENSOR STATE INPUTS
     # =====================================================
 
-    horizon.stateInMsg.subscribeTo(KEBAB.scStateOutMsg)
-    TAM.stateInMsg.subscribeTo(KEBAB.scStateOutMsg)
-    refObj.stateInMsg.subscribeTo(KEBAB.scStateOutMsg)
+    horizon.stateInMsg.subscribeTo(delfi.scStateOutMsg)
+    TAM.stateInMsg.subscribeTo(delfi.scStateOutMsg)
+    refObj.stateInMsg.subscribeTo(delfi.scStateOutMsg)
 
-    KEBAB_NavObj.scStateInMsg.subscribeTo(KEBAB.scStateOutMsg)
+    delfi_NavObj.scStateInMsg.subscribeTo(delfi.scStateOutMsg)
 
-    aeroTorque.attInMsg.subscribeTo(KEBAB_NavObj.attOutMsg)
-    horizon.attInMsg.subscribeTo(KEBAB_NavObj.attOutMsg)
+    aeroTorque.attInMsg.subscribeTo(delfi_NavObj.attOutMsg)
+    horizon.attInMsg.subscribeTo(delfi_NavObj.attOutMsg)
 
-    magDist.attNavInMsg.subscribeTo(KEBAB_NavObj.attOutMsg)
+    magDist.attNavInMsg.subscribeTo(delfi_NavObj.attOutMsg)
 
 
     # =====================================================
