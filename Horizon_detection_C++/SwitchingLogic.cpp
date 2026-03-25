@@ -9,7 +9,7 @@ HorizonSensorManager::HorizonSensorManager() {
     for (int i = 0; i < 4; i++) { confirm_counts[i] = 0; grace_counts[i] = 0; }
 }
 
-void HorizonSensorManager::update(const float pitches[4], const float rolls[4], const bool valids[4], HorizonOutput& output) {
+void HorizonSensorManager::update(const float pitches[4], const float rolls[4], const float areas[4], const bool valids[4], HorizonOutput& output) {
     int candidates[4] = {-1, -1, -1, -1};
     int candidate_count = 0;
     int total_confirms = 0;
@@ -60,10 +60,10 @@ void HorizonSensorManager::update(const float pitches[4], const float rolls[4], 
         }
     }
 
-    select_output(candidates, candidate_count, pitches, rolls, output);
+    select_output(candidates, candidate_count, pitches, rolls, areas, output);
 }
 
-void HorizonSensorManager::select_output(const int candidates[4], int candidate_count, const float pitches[4], const float rolls[4], HorizonOutput& output) {
+void HorizonSensorManager::select_output(const int candidates[4], int candidate_count, const float pitches[4], const float rolls[4], const float areas[4], HorizonOutput& output) {
     if (candidate_count == 0) {
         output.pitch = last_pitch; output.roll = last_roll;
         output.active_sensor_id = -1; output.confidence = 0;
@@ -72,21 +72,57 @@ void HorizonSensorManager::select_output(const int candidates[4], int candidate_
     }
 
     float sum_pitch = 0.0f, sum_sin_roll = 0.0f, sum_cos_roll = 0.0f;
+    float total_weight = 0.0f;
+    int best_sensor_id = candidates[0];
+    float max_weight = -1.0f;
+    
+    // Ideal area for MLX90640 (32x24) where horizon is perfectly centered
+    const float IDEAL_AREA = 384.0f; 
+
     for (int i = 0; i < candidate_count; i++) {
         int id = candidates[i];
-        sum_pitch += pitches[id];
+        
+        // Calculate how far the area is from 384
+        float area_error = fabsf(areas[id] - IDEAL_AREA);
+        
+        // Invert the error so an area of 384 yields the maximum weight (384)
+        float weight = IDEAL_AREA - area_error;
+        
+        // Safeguard to prevent zero or negative division if area somehow exceeds 768 bounds
+        if (weight <= 0.0f) weight = 0.001f; 
+        
+        // Track which sensor is closest to the ideal area (highest weight)
+        if (weight > max_weight) {
+            max_weight = weight;
+            best_sensor_id = id;
+        }
+
+        // Weighted pitch
+        sum_pitch += pitches[id] * weight;
+        
+        // Weighted circular roll 
         float r_rad = rolls[id] * (M_PI / 180.0f);
-        sum_sin_roll += sinf(r_rad);
-        sum_cos_roll += cosf(r_rad);
+        sum_sin_roll += sinf(r_rad) * weight;
+        sum_cos_roll += cosf(r_rad) * weight;
+        
+        total_weight += weight;
     }
 
-    last_pitch = sum_pitch / candidate_count;
-    last_roll = fmodf(atan2f(sum_sin_roll, sum_cos_roll) * (180.0f / M_PI), 360.0f);
-    if (last_roll < 0) last_roll += 360.0f;
+    if (total_weight > 0.0f) {
+        output.pitch = sum_pitch / total_weight; 
+        
+        // Recover the weighted circular average for roll
+        output.roll = atan2f(sum_sin_roll, sum_cos_roll) * (180.0f / M_PI);
+        if (output.roll < 0) output.roll += 360.0f;
+    } else {
+        output.pitch = last_pitch;
+        output.roll = last_roll;
+    }
 
-    output.pitch = last_pitch;
-    output.roll = last_roll;
-    output.active_sensor_id = candidates[0];
-    output.confidence = candidate_count;
+    output.active_sensor_id = best_sensor_id; 
+    output.confidence = candidate_count; 
     output.is_valid = true;
+
+    last_pitch = output.pitch;
+    last_roll = output.roll;
 }

@@ -5,7 +5,7 @@
 class HorizonSensorManager {
 public:
     HorizonSensorManager();
-    void update(const float pitches[4], const float rolls[4], const bool valids[4], HorizonOutput& output);
+    void update(const float pitches[4], const float rolls[4], const float areas[4], const bool valids[4], HorizonOutput& output);
 
 private:
     static constexpr int NUM_SENSORS = 4;
@@ -27,5 +27,5 @@ private:
     int lost_counter;
     float current_gate;
 
-    void select_output(const int candidates[4], int candidate_count, const float pitches[4], const float rolls[4], HorizonOutput& output);
+    void select_output(const int candidates[4], int candidate_count, const float pitches[4], const float rolls[4], const float areas[4], HorizonOutput& output);
 };
