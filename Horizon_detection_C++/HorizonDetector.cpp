@@ -1,5 +1,7 @@
 #include "HorizonDetector.hpp"
+#include "HorizonDetector.h"// Ensures the C-bridge signature matches exactly
 #include <math.h>
+#include <string.h>
 
 extern const int32_t X_ANGLES_FIXED[768];
 extern const int32_t Y_ANGLES_FIXED[768];
@@ -9,12 +11,12 @@ extern const int TABLE_SIZE;
 
 // --- Isolate the largest coherent thermal blob ---
 int HorizonDetector::extract_largest_blob(const float* frame_data, bool* valid_mask) {
-    bool visited[PIXELS_PER_SENSOR] = {false};
-    int queue[PIXELS_PER_SENSOR];
-    int current_blob[PIXELS_PER_SENSOR];
-    
+    static bool visited[PIXELS_PER_SENSOR];
+    static int queue[PIXELS_PER_SENSOR];
+    static int current_blob[PIXELS_PER_SENSOR];
+    memset(visited,0,sizeof(visited));
     int max_blob_size = 0;
-    int best_blob_indices[PIXELS_PER_SENSOR];
+    static int best_blob_indices[PIXELS_PER_SENSOR];
 
     for (int i = 0; i < PIXELS_PER_SENSOR; i++) {
         valid_mask[i] = false; // Initialize output mask
@@ -68,8 +70,8 @@ int HorizonDetector::extract_largest_blob(const float* frame_data, bool* valid_m
     return max_blob_size;
 }
 
-
-bool HorizonDetector::process_frame(const float* frame_data, float& local_pitch, float& local_roll, float& out_area) {
+// --- Main processing pipeline ---
+bool HorizonDetector::process_frame(const float* frame_data, float& local_pitch, float& local_roll, float& out_area, uint8_t* out_mask) {
     int32_t sum_x_fixed = 0, sum_y_fixed = 0, total_area_fixed = 0;
     
     // 1. Get a mask of ONLY the main Earth blob (ignores scattered noise/stars)
@@ -77,7 +79,11 @@ bool HorizonDetector::process_frame(const float* frame_data, float& local_pitch,
     int valid_pixels = extract_largest_blob(frame_data, is_earth_pixel);
 
     // 2. Gatekeeping: Ensure the blob is the right size
-    if (valid_pixels < 20 || valid_pixels > 748) return false;
+    if (out_mask != nullptr){
+    	for (int i = 0; i < PIXELS_PER_SENSOR; i++){
+    		out_mask[i] = is_earth_pixel[i] ? 255 : 0;
+    	}
+    }
 
     // Output the area of the detected blob for weighting sensors
     out_area = (float)valid_pixels;
@@ -109,14 +115,15 @@ bool HorizonDetector::process_frame(const float* frame_data, float& local_pitch,
     return false;
 }
 
-bool HorizonDetector::perform_banded_search(int32_t v_x_fixed, int32_t v_y_fixed, int32_t area_fixed, 
+// --- Look-up table band search ---
+bool HorizonDetector::perform_banded_search(int32_t v_x_fixed, int32_t v_y_fixed, int32_t area_fixed,
                                             int32_t& out_pitch_fixed, int32_t& out_roll_fixed) {
     float approx_roll = atan2f((float)v_y_fixed, (float)v_x_fixed);
     int32_t approx_roll_fixed = (int32_t)(approx_roll * SCALER);
-    
+
     int32_t tolerance = (int32_t)(0.15f * SCALER);
     int32_t pi_fixed = (int32_t)(M_PI * SCALER);
-    
+
     int32_t lower_bound = approx_roll_fixed - tolerance;
     int32_t upper_bound = approx_roll_fixed + tolerance;
     int32_t lower_wrap = 999999, upper_wrap = -999999;
@@ -134,14 +141,14 @@ bool HorizonDetector::perform_banded_search(int32_t v_x_fixed, int32_t v_y_fixed
 
     for (int i = 0; i < TABLE_SIZE; i++) {
         int32_t t_roll = CONVERSION_TABLE[i].atan2_val;
-        if ((t_roll >= lower_bound && t_roll <= upper_bound) || 
+        if ((t_roll >= lower_bound && t_roll <= upper_bound) ||
             (t_roll >= lower_wrap && t_roll <= upper_wrap)) {
-            
+
             int64_t dx = (int64_t)CONVERSION_TABLE[i].v_x - v_x_fixed;
             int64_t dy = (int64_t)CONVERSION_TABLE[i].v_y - v_y_fixed;
             int64_t da = (int64_t)CONVERSION_TABLE[i].area - area_fixed;
             int64_t dist_sq = (dx*dx) + (dy*dy) + (da*da);
-            
+
             if (min_dist_sq == -1 || dist_sq < min_dist_sq) {
                 min_dist_sq = dist_sq;
                 best_idx = i;
@@ -156,4 +163,20 @@ bool HorizonDetector::perform_banded_search(int32_t v_x_fixed, int32_t v_y_fixed
     out_roll_fixed = CONVERSION_TABLE[best_idx].table_roll;
     out_pitch_fixed = CONVERSION_TABLE[best_idx].table_pitch;
     return true;
+}
+
+// ====================================================================
+// C-BRIDGE IMPLEMENTATION
+// This allows main.c to call the C++ class methods.
+// ====================================================================
+extern "C" {
+    // We create a persistent instance of your class here.
+    // Static ensures it is allocated once at startup, safely avoiding dynamic memory.
+    static HorizonDetector detector;
+
+    bool HorizonDetector_Process(const float* frame_data, float* pitch, float* roll, float* area, uint8_t* mask) {
+        // C doesn't have references (&), so we use pointers (*)
+        // and "dereference" them to pass them into your C++ function
+        return detector.process_frame(frame_data, *pitch, *roll, *area, mask);
+    }
 }
