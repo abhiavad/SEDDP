@@ -9,15 +9,15 @@ C_SRCS += \
 ../Drivers/MLX90640/Src/MLX90640_I2C_Driver.c \
 ../Drivers/MLX90640/Src/i2c.c 
 
-OBJS += \
-./Drivers/MLX90640/Src/MLX90640_API.o \
-./Drivers/MLX90640/Src/MLX90640_I2C_Driver.o \
-./Drivers/MLX90640/Src/i2c.o 
-
 C_DEPS += \
 ./Drivers/MLX90640/Src/MLX90640_API.d \
 ./Drivers/MLX90640/Src/MLX90640_I2C_Driver.d \
 ./Drivers/MLX90640/Src/i2c.d 
+
+OBJS += \
+./Drivers/MLX90640/Src/MLX90640_API.o \
+./Drivers/MLX90640/Src/MLX90640_I2C_Driver.o \
+./Drivers/MLX90640/Src/i2c.o 
 
 
 # Each subdirectory must supply rules for building sources it contributes

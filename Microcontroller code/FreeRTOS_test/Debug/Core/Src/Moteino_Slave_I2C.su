@@ -1,0 +1,9 @@
+../Core/Src/Moteino_Slave_I2C.c:20:6:GetMoteinoRXData	24	static
+../Core/Src/Moteino_Slave_I2C.c:25:6:GetMoteinoTXData	24	static
+../Core/Src/Moteino_Slave_I2C.c:30:6:SetMoteinoTXData	24	static
+../Core/Src/Moteino_Slave_I2C.c:35:6:PrepareFloatForI2CSending	32	static
+../Core/Src/Moteino_Slave_I2C.c:46:13:HAL_I2C_ListenCpltCallback	16	static
+../Core/Src/Moteino_Slave_I2C.c:52:13:HAL_I2C_AddrCallback	16	static
+../Core/Src/Moteino_Slave_I2C.c:70:6:HAL_I2C_SlaveTxCpltCallback	16	static
+../Core/Src/Moteino_Slave_I2C.c:77:6:HAL_I2C_SlaveRxCpltCallback	16	static
+../Core/Src/Moteino_Slave_I2C.c:95:6:HAL_I2C_ErrorCallback	24	static
