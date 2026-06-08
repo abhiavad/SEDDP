@@ -1,72 +1,119 @@
 #include "CombiningSensor.hpp"
+#include "../Drivers/MLX90640/Inc/MLX90642.h"
 #include <math.h>
 #include "main.h"
+
 extern I2C_HandleTypeDef hi2c1;
+extern I2C_HandleTypeDef hi2c2; // Added to support your secondary bus
 
 HorizonSubsystem::HorizonSubsystem() {}
+
+// ==============================================================================
+// I2C HARDWARE HELPERS FOR MLX90642
+// ==============================================================================
+
+// ADD THIS HELPER TO ROUTE THE BUS CORRECTLY
+static I2C_HandleTypeDef* get_i2c_bus(int sensor_idx) {
+    // Indices 0,1 -> I2C1 | Indices 2,3 -> I2C2
+    return (sensor_idx < 2) ? &hi2c1 : &hi2c2;
+}
+
+bool HorizonSubsystem::I2C_ReadReg(int sensor_idx, uint16_t reg_addr, uint16_t* data) {
+    uint8_t rx_buf[2];
+    uint8_t i2c_addr = SENSOR_ADDRESSES[sensor_idx];
+    I2C_HandleTypeDef* hi2c = get_i2c_bus(sensor_idx);
+    
+    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, 2, 100) == HAL_OK) {
+        *data = (rx_buf[0] << 8) | rx_buf[1];
+        return true;
+    }
+    return false;
+}
+
+bool HorizonSubsystem::I2C_WriteReg(int sensor_idx, uint16_t reg_addr, uint16_t data) {
+    uint8_t i2c_addr = SENSOR_ADDRESSES[sensor_idx];
+    I2C_HandleTypeDef* hi2c = get_i2c_bus(sensor_idx);
+    uint8_t cmd[2];
+
+    cmd[0] = data >> 8;
+    cmd[1] = data & 0xFF;
+
+    if (HAL_I2C_Mem_Write(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, cmd, 2, 500) == HAL_OK) {
+        HAL_Delay(5); // Required 5ms EEPROM burn time
+        return true;
+    }
+    return false;
+}
+
+bool HorizonSubsystem::I2C_ReadBlock(int sensor_idx, uint16_t reg_addr, uint16_t* data, uint16_t length) {
+    static uint8_t rx_buf[1536]; //static to avoid memory issues in RTOS
+    uint8_t i2c_addr = SENSOR_ADDRESSES[sensor_idx];
+    I2C_HandleTypeDef* hi2c = get_i2c_bus(sensor_idx);
+    
+    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, length * 2, 500) == HAL_OK) {
+        for (int i = 0; i < length; i++) {
+            data[i] = (rx_buf[i * 2] << 8) | rx_buf[i * 2 + 1];
+        }
+        return true;
+    }
+    return false;
+}
 
 // ==============================================================================
 // HARDWARE INITIALIZATION
 // ==============================================================================
 bool HorizonSubsystem::init_sensors() {
-    static uint16_t eeMLX90640[832]; 
     bool atLeastOneWorking = false;
 
     for (int i = 0; i < NUM_SENSORS; i++) {
-        // Determine which bus to use based on index
-        // EHS_0, EHS_1 -> I2C1 | EHS_2, EHS_3 -> I2C2
-        //I2C_HandleTypeDef* currentBus = &hi2c1; //(i < 2) ? &hi2c1 : &hi2c2;
-        uint8_t addr = SENSOR_ADDRESSES[i]; // 0x33 or 0x34, otherwise i % 2
+        uint16_t fw_version = 0;
 
-        // IMPORTANT: You may need to tell your I2C driver which bus is active 
-        // before calling these library functions if they don't take a bus handle.
-        //set_active_i2c_bus(currentBus);
+        // Check if the sensor is alive on the bus
+        if (I2C_ReadReg(i, 0xFFF8, &fw_version)) {
+            atLeastOneWorking = true;
 
-        // 1. Configure the sensor
-        if (MLX90640_SetRefreshRate(addr, 0x04) != 0 || 
-            MLX90640_SetResolution(addr, 0x03) != 0) {
-            continue; // Skip to next sensor
+            // --- NATIVE REFRESH RATE CONFIGURATION ---
+            uint16_t rate_reg = 0;
+            // Read the current configuration
+            if (I2C_ReadReg(i, MLX90642_REFRESH_RATE_ADDRESS, &rate_reg)) {
+
+                // Clear bits 0,1,2 and OR with the 4Hz mask
+                rate_reg = (rate_reg & ~MLX90642_REFRESH_RATE_MASK) | MLX90642_REF_RATE_4HZ;
+
+                // Write back to the sensor EEPROM
+                I2C_WriteReg(i, MLX90642_REFRESH_RATE_ADDRESS, rate_reg);
+            }
         }
-
-        // 2. Dump the EEPROM
-        //MLX90640_I2CFreqSet(400); // Set I2C frequency to 400 kHz for safe EEPROM read&write
-        if (MLX90640_DumpEE(addr, eeMLX90640) != 0) {
-            continue; 
-        }
-
-        // 3. Extract parameters
-        if (MLX90640_ExtractParameters(eeMLX90640, &mlx_params[i]) != 0) {
-            continue;
-        }
-
-        atLeastOneWorking = true;
     }
 
     return atLeastOneWorking; 
 }
-
 // ==============================================================================
 // HARDWARE READING
 // ==============================================================================
 bool HorizonSubsystem::read_thermal_camera(int sensor_idx, float* buffer) {
-    // Array to hold the raw frame data. 
-    // Declared static to save stack space (1668 bytes).
-    static uint16_t mlx90640Frame[834]; 
+    uint16_t status_reg = 0;
     
-    uint8_t addr = SENSOR_ADDRESSES[sensor_idx];
-
-    //MLX90640_I2CFreqSet(1000); // Update frequency to 1 MHz
-
-    // Read the raw ADC values from the sensor RAM
-    int status = MLX90640_GetFrameData(addr, mlx90640Frame);
-    if (status < 0) return false;
-
-    // Calculate final temperatures (in degrees Celsius)
-    float emissivity = 0.95f;
-    float tr = 23.15f; // Reflected ambient temperature
-
-    // This Melexis function populates your 768-element 'buffer' directly!
-    MLX90640_CalculateTo(mlx90640Frame, &mlx_params[sensor_idx], emissivity, tr, buffer);
+    // CRITICAL FIX: Pass 'sensor_idx' into these functions, NOT 'addr'
+    // 1. Read DSP status flags
+    if (!I2C_ReadReg(sensor_idx, MLX90642_FLAGS_ADDRESS, &status_reg)) return false;
+    
+    // 2. Check the READY flag
+    if ((status_reg & MLX90642_FLAGS_READY_MASK) == 0) return false;
+    
+    // 3. Clear the READY flag by performing a dummy read
+    uint16_t dummy;
+    I2C_ReadReg(sensor_idx, MLX90642_TO_DATA_ADDRESS, &dummy);
+    
+    // 4. Block read the entire 768-pixel temperature frame
+    static uint16_t mlx90642Frame[768];
+    if (!I2C_ReadBlock(sensor_idx, MLX90642_TO_DATA_ADDRESS, mlx90642Frame, 768)) return false;
+    
+    // 5. Convert to Celsius
+    for (int i = 0; i < 768; i++) {
+        int16_t signed_val = (int16_t)mlx90642Frame[i];
+        buffer[i] = (float)signed_val / 50.0f;
+    }
     
     return true;
 }
@@ -81,21 +128,17 @@ HorizonOutput HorizonSubsystem::process_sensors() {
     bool current_valids[4] = {false};
     HorizonOutput final_output = {0};
 
-
     for (int i = 0; i < NUM_SENSORS; i++) {
         
-        // --- THE ACTUAL HARDWARE CALL ---
         bool read_success = read_thermal_camera(i, debug_thermal[i]);
         
         if (read_success) {
             float local_p, local_r, local_area;
             
-            // Pass the populated frame_buffer straight to your detector
             if (detector.process_frame(debug_thermal[i], local_p, local_r, local_area, debug_mask[i])) {
                 current_pitches[i] = local_p;
                 current_areas[i] = local_area;
 
-                // Add the physical offset to convert local roll to body roll
                 float global_r = fmodf(local_r + SENSOR_ROLL_OFFSETS[i], 360.0f);
                 if (global_r < 0) global_r += 360.0f;
                 
@@ -105,7 +148,6 @@ HorizonOutput HorizonSubsystem::process_sensors() {
         }
     }
 
-    // Pass the 4 sensor streams into the Manager
     manager.update(current_pitches, current_rolls, current_areas, current_valids, final_output);
     
     return final_output;

@@ -1,11 +1,10 @@
-
 #pragma once
 #include "HorizonTypes.hpp"
 #include "HorizonDetector.hpp"
 #include "SwitchingLogic.hpp"
 
-// Include the official Melexis driver header
-#include "../Drivers/MLX90640/Inc/MLX90640_API.h"
+// Replaced the MLX90640 API with standard STM32 HAL
+#include "stm32l4xx_hal.h" 
 
 class HorizonSubsystem {
 public:
@@ -21,19 +20,21 @@ public:
     uint8_t debug_mask[4][768];
 
 private:
-    static constexpr int NUM_SENSORS = 1;
-    const float SENSOR_ROLL_OFFSETS[4] = {0.0f, 90.0f, 180.0f, 270.0f}; // can be changed to NUM_SENSORS when 4 are connected
+    static constexpr int NUM_SENSORS = 4; // Adjust based on how many you have active
+    const float SENSOR_ROLL_OFFSETS[4] = {0.0f, 90.0f, 180.0f, 270.0f};
 
-    // The I2C addresses of your 4 sensors 
-    // (If using a multiplexer, these might all be 0x33, and you switch channels before reading)
-    const uint8_t SENSOR_ADDRESSES[4] = {0x34, 0x33, 0x35, 0x36}; //idem dito NUM_SENSORS
-
-    // Calibration parameters for each sensor extracted from their EEPROMs
-    paramsMLX90640 mlx_params[4]; //idem dito NUM_SENSORS
+    // 7-bit I2C addresses. Ensure you've reprogrammed the EEPROMs on the overlapping 
+    // sensors (default is 0x66, which is 0x33 in 7-bit) to match these!
+    const uint8_t SENSOR_ADDRESSES[4] = {0x66, 0x67, 0x68, 0x69};
 
     HorizonDetector detector;
     HorizonSensorManager manager;
 
     // Hardware read wrapper
     bool read_thermal_camera(int sensor_idx, float* buffer);
+
+    // Custom lightweight I2C helpers for the MLX90642
+    bool I2C_ReadReg(int sensor_idx, uint16_t reg_addr, uint16_t* data);
+    bool I2C_WriteReg(int sensor_idx, uint16_t reg_addr, uint16_t data);
+    bool I2C_ReadBlock(int sensor_idx, uint16_t reg_addr, uint16_t* data, uint16_t length);
 };
