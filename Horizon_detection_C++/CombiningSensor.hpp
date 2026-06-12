@@ -20,11 +20,10 @@ public:
     uint8_t debug_mask[4][768];
 
 private:
-    static constexpr int NUM_SENSORS = 4; // Adjust based on how many you have active
+    static constexpr int NUM_SENSORS = 4; // Adjust based on how many you have active; nominally 4
     const float SENSOR_ROLL_OFFSETS[4] = {0.0f, 90.0f, 180.0f, 270.0f};
 
-    // 7-bit I2C addresses. Ensure you've reprogrammed the EEPROMs on the overlapping 
-    // sensors (default is 0x66, which is 0x33 in 7-bit) to match these!
+    // I2C addresses
     const uint8_t SENSOR_ADDRESSES[4] = {0x66, 0x67, 0x68, 0x69};
 
     HorizonDetector detector;

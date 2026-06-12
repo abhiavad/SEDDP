@@ -15,6 +15,10 @@ typedef struct {
     int active_sensor_id;
     int confidence;
     bool is_valid;
+    float ind_pitch[4];     // remove comment when DEBUGGING
+    float ind_roll[4];      // remove comment when DEBUGGING
+    int confirm_counts[4];  // remove comment when DEBUGGING
+    int grace_counts[4];    // remove comment when DEBUGGING
 } C_HorizonOutput;
 
 // Bridge functions

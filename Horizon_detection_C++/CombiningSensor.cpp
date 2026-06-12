@@ -3,8 +3,8 @@
 #include <math.h>
 #include "main.h"
 
-extern I2C_HandleTypeDef hi2c1;
-extern I2C_HandleTypeDef hi2c2; // Added to support your secondary bus
+extern I2C_HandleTypeDef hi2c1; // First channel for 0x66 and 0x67
+extern I2C_HandleTypeDef hi2c2; // Second channel for 0x68 and 0x69
 
 HorizonSubsystem::HorizonSubsystem() {}
 
@@ -23,7 +23,7 @@ bool HorizonSubsystem::I2C_ReadReg(int sensor_idx, uint16_t reg_addr, uint16_t* 
     uint8_t i2c_addr = SENSOR_ADDRESSES[sensor_idx];
     I2C_HandleTypeDef* hi2c = get_i2c_bus(sensor_idx);
     
-    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, 2, 100) == HAL_OK) {
+    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, 2, 20) == HAL_OK) {
         *data = (rx_buf[0] << 8) | rx_buf[1];
         return true;
     }
@@ -38,7 +38,7 @@ bool HorizonSubsystem::I2C_WriteReg(int sensor_idx, uint16_t reg_addr, uint16_t 
     cmd[0] = data >> 8;
     cmd[1] = data & 0xFF;
 
-    if (HAL_I2C_Mem_Write(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, cmd, 2, 500) == HAL_OK) {
+    if (HAL_I2C_Mem_Write(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, cmd, 2, 20) == HAL_OK) {
         HAL_Delay(5); // Required 5ms EEPROM burn time
         return true;
     }
@@ -50,7 +50,7 @@ bool HorizonSubsystem::I2C_ReadBlock(int sensor_idx, uint16_t reg_addr, uint16_t
     uint8_t i2c_addr = SENSOR_ADDRESSES[sensor_idx];
     I2C_HandleTypeDef* hi2c = get_i2c_bus(sensor_idx);
     
-    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, length * 2, 500) == HAL_OK) {
+    if (HAL_I2C_Mem_Read(hi2c, (i2c_addr << 1), reg_addr, I2C_MEMADD_SIZE_16BIT, rx_buf, length * 2, 40) == HAL_OK) {
         for (int i = 0; i < length; i++) {
             data[i] = (rx_buf[i * 2] << 8) | rx_buf[i * 2 + 1];
         }
@@ -150,5 +150,11 @@ HorizonOutput HorizonSubsystem::process_sensors() {
 
     manager.update(current_pitches, current_rolls, current_areas, current_valids, final_output);
     
+    // Remove comment from this for loop when DEBUGGING, this will retrieve individual sensor's pitch and roll estimations
+    for (int i = 0; i < NUM_SENSORS; i++) {
+    	final_output.ind_pitch[i] = current_pitches[i];
+    	final_output.ind_roll[i] = current_rolls[i];
+    }
+
     return final_output;
 }

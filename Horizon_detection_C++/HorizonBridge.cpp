@@ -18,6 +18,15 @@ extern "C" C_HorizonOutput Bridge_Process_Sensors(void) {
     c_out.confidence = cpp_out.confidence;
     c_out.is_valid = cpp_out.is_valid;
 
+    // remove the comment from the for loop for DEBUGGING, it sends the individual pitch, roll + grace and confirm counters. wrapped up so STM32 can read it in C
+
+    for (int i = 0; i < 4; i++){
+    	c_out.ind_pitch[i] = cpp_out.ind_pitch[i];
+    	c_out.ind_roll[i] = cpp_out.ind_roll[i];
+    	c_out.confirm_counts[i] = cpp_out.confirm_counts[i];
+    	c_out.grace_counts[i] = cpp_out.grace_counts[i];
+    }
+
     return c_out;
 }
 

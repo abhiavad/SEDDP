@@ -6,8 +6,8 @@ public:
     static constexpr int SENSOR_WIDTH = 32;
     static constexpr int SENSOR_HEIGHT = 24;
     static constexpr int PIXELS_PER_SENSOR = SENSOR_WIDTH * SENSOR_HEIGHT; // 768
-    static constexpr int THRESHOLD_TEMP = 26;
-    static constexpr int32_t SCALER = 4096;
+    static constexpr int THRESHOLD_TEMP = 38;                              // change temperature to what is needed in space
+    static constexpr int32_t SCALER = 4096;                                // to save space a SCALER is used
 
     // Returns true if a valid horizon was found in the 100-degree local window
     bool process_frame(const float* frame_data, float& local_pitch, float& local_roll, float& out_area, uint8_t* out_mask = nullptr);

@@ -156,9 +156,7 @@ bool HorizonDetector::perform_banded_search(int32_t v_x_fixed, int32_t v_y_fixed
         }
     }
 
-    // Reject poor matches and Pinhole Phantoms (Pitch > 90 deg)
-    if (best_idx == -1 || min_dist_sq > 167772160LL) return false;
-    if (CONVERSION_TABLE[best_idx].table_pitch > 368640) return false; // 90 * 4096
+    if (best_idx == -1) return false;
 
     out_roll_fixed = CONVERSION_TABLE[best_idx].table_roll;
     out_pitch_fixed = CONVERSION_TABLE[best_idx].table_pitch;

@@ -20,4 +20,8 @@ struct HorizonOutput {
     int active_sensor_id;
     int confidence;
     bool is_valid;
+    float ind_pitch[4];    // remove comment when DEBUGGING; this is a DEBUG variable
+    float ind_roll[4];     // remove comment when DEBUGGING; this is a DEBUG variable
+    int confirm_counts[4]; // remove comment when DEBUGGING; this is a DEBUG variable
+    int grace_counts[4];   // remove comment when DEBUGGING; this is a DEBUG variable
 };

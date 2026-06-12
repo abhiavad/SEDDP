@@ -10,9 +10,9 @@ public:
 private:
     static constexpr int NUM_SENSORS = 4;
     static constexpr int CONFIRM_THRESH = 5;
-    static constexpr int GRACE_LIMIT = 2;
-    static constexpr float GATE_WIDE = 22.5f;
-    static constexpr float GATE_NARROW = 3.75f;
+    static constexpr int GRACE_LIMIT = 5;
+    static constexpr float GATE_WIDE = 30.0f;
+    static constexpr float GATE_NARROW = 15.0f;
     static constexpr int STABILITY_LOCK_TIME = 40;
     static constexpr int HYSTERESIS_LOST_TIME = 10;
 
